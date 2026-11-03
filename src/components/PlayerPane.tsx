@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import shaka from 'shaka-player'
+import { installShakaPolyfills } from '../player/installShakaPolyfills'
 
 type PlayerPaneProps = {
   src: string
@@ -12,7 +13,7 @@ export function PlayerPane({ src }: PlayerPaneProps) {
     const video = videoRef.current
     if (!video) return
 
-    shaka.polyfill.installAll()
+    installShakaPolyfills()
 
     if (!shaka.Player.isBrowserSupported()) {
       console.error('Shaka Player is not supported in this browser')
