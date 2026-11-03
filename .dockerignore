@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.cursor
+.codegraph
+docs
+*.md
+.env
+.env.*
+docker-compose.yml
+.dockerignore

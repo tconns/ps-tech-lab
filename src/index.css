@@ -1,0 +1,46 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+}
+
+.dual {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+}
+
+.pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pane video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+@media (max-width: 768px), (orientation: portrait) {
+  .dual {
+    flex-direction: column;
+  }
+}
