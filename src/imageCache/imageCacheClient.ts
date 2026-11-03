@@ -125,7 +125,7 @@ export async function shrinkCachedImage(url: string, cached: CachedImage): Promi
     contentType: cached.blob.type || 'application/octet-stream',
     bytes: cached.bytes,
   })
-  if (!packed.note.startsWith('shrink ')) {
+  if (!packed.note.startsWith('shrunk ')) {
     return { bytes: cached.bytes, note: packed.note, image: cached }
   }
   URL.revokeObjectURL(cached.blobUrl)

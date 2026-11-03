@@ -1,8 +1,11 @@
 /** Bytes above this are redrawn on a normal canvas before CacheStorage. */
 export const SHRINK_OVER_BYTES = 80_000
 
-const MAX_EDGE = 480
-const QUALITY = 0.7
+const PASSES = [
+  { edge: 480, quality: 0.7 },
+  { edge: 360, quality: 0.5 },
+  { edge: 240, quality: 0.4 },
+] as const
 
 export type PackedImage = {
   body: ArrayBuffer
@@ -13,7 +16,7 @@ export type PackedImage = {
 /**
  * Shrink a large image on the main-thread canvas.
  * PS5 has no OffscreenCanvas, so this must not run inside the worker.
- * Keeps the original bytes when the image is already small, or the encode is not smaller.
+ * Keeps the original bytes when every encode is missing or not smaller.
  */
 export async function shrinkIfLarge(body: ArrayBuffer, contentType: string): Promise<PackedImage> {
   const original = { body, contentType, note: '' }
@@ -30,26 +33,36 @@ export async function shrinkIfLarge(body: ArrayBuffer, contentType: string): Pro
 
   try {
     const img = await loadImage(url)
-    const longest = Math.max(img.naturalWidth, img.naturalHeight)
-    if (longest < 1) return original
-    const scale = Math.min(1, MAX_EDGE / longest)
-    const width = Math.max(1, Math.round(img.naturalWidth * scale))
-    const height = Math.max(1, Math.round(img.naturalHeight * scale))
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return { ...original, note: 'shrink skipped: no 2d context' }
-    ctx.drawImage(img, 0, 0, width, height)
+    const sourceWidth = img.naturalWidth || img.width
+    const sourceHeight = img.naturalHeight || img.height
+    const longest = Math.max(sourceWidth, sourceHeight)
+    if (longest < 1) return { ...original, note: 'shrink skipped: no dimensions' }
 
-    const encoded = await lightestBlob(canvas)
-    if (!encoded || encoded.size >= body.byteLength) {
-      return { ...original, note: 'shrink skipped: encode not smaller' }
+    let best: { blob: Blob; width: number; height: number } | null = null
+    for (const pass of PASSES) {
+      const scale = Math.min(1, pass.edge / longest)
+      const width = Math.max(1, Math.round(sourceWidth * scale))
+      const height = Math.max(1, Math.round(sourceHeight * scale))
+      if (!paint(canvas, img, sourceWidth, sourceHeight, width, height)) {
+        return { ...original, note: 'shrink skipped: no 2d context' }
+      }
+      const encoded = await lightestBlob(canvas, pass.quality)
+      if (!encoded || encoded.size >= body.byteLength) continue
+      best = { blob: encoded, width, height }
+      break
+    }
+
+    if (!best) {
+      return {
+        ...original,
+        note: `shrink skipped: ${sourceWidth}x${sourceHeight} canvas ${canvas.width}x${canvas.height} not smaller than ${body.byteLength}B`,
+      }
     }
 
     return {
-      body: await encoded.arrayBuffer(),
-      contentType: encoded.type,
-      note: `shrink ${img.naturalWidth}x${img.naturalHeight} ${body.byteLength}B → ${width}x${height} ${encoded.type} ${encoded.size}B`,
+      body: await best.blob.arrayBuffer(),
+      contentType: best.blob.type,
+      note: `shrunk ${sourceWidth}x${sourceHeight} ${body.byteLength}B → ${best.width}x${best.height} ${best.blob.type} ${best.blob.size}B`,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -58,6 +71,22 @@ export async function shrinkIfLarge(body: ArrayBuffer, contentType: string): Pro
     canvas.remove()
     URL.revokeObjectURL(url)
   }
+}
+
+function paint(
+  canvas: HTMLCanvasElement,
+  img: HTMLImageElement,
+  sourceWidth: number,
+  sourceHeight: number,
+  width: number,
+  height: number,
+): boolean {
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return false
+  ctx.drawImage(img, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height)
+  return true
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -69,18 +98,49 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   })
 }
 
-/** WebP when the browser can encode it, otherwise JPEG. Pick the smaller file. */
-async function lightestBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
-  const webp = await canvasToBlob(canvas, 'image/webp', QUALITY)
-  const jpeg = await canvasToBlob(canvas, 'image/jpeg', QUALITY)
-  const options = [webp, jpeg].filter((blob): blob is Blob => {
-    if (!blob) return false
-    return blob.type === 'image/webp' || blob.type === 'image/jpeg'
-  })
+/** Smallest WebP or JPEG. toDataURL covers PS5 builds where toBlob returns an empty type or nothing. */
+async function lightestBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  const options = [
+    await encode(canvas, 'image/webp', quality),
+    await encode(canvas, 'image/jpeg', quality),
+  ].filter((blob): blob is Blob => blob != null)
   options.sort((a, b) => a.size - b.size)
   return options[0] ?? null
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), type, quality))
+async function encode(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  const fromBlob = await blobViaToBlob(canvas, type, quality)
+  const fromUrl = blobViaDataUrl(canvas, type, quality)
+  const options = [fromBlob, fromUrl].filter((blob): blob is Blob => blob != null && blob.size > 0)
+  options.sort((a, b) => a.size - b.size)
+  return options[0] ?? null
+}
+
+function blobViaToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  if (typeof canvas.toBlob !== 'function') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob || blob.size < 1) {
+        resolve(null)
+        return
+      }
+      const actual = blob.type || type
+      if (actual !== 'image/jpeg' && actual !== 'image/webp') {
+        resolve(null)
+        return
+      }
+      resolve(blob.type === actual ? blob : new Blob([blob], { type: actual }))
+    }, type, quality)
+  })
+}
+
+function blobViaDataUrl(canvas: HTMLCanvasElement, type: string, quality: number): Blob | null {
+  if (typeof canvas.toDataURL !== 'function') return null
+  const dataUrl = canvas.toDataURL(type, quality)
+  const marker = `data:${type};base64,`
+  if (!dataUrl.startsWith(marker)) return null
+  const binary = atob(dataUrl.slice(marker.length))
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
 }
