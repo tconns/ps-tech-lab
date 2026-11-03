@@ -9,15 +9,17 @@ npm install
 npm run dev
 ```
 
-## Docker
+## Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
+Mở http://localhost (port 80). Chi tiết service trong `docker-compose.yml`.
+
 ## Dokploy
 
-Xem [docs/DOKPLOY.md](docs/DOKPLOY.md).
+Dùng loại **Docker Compose** + file `docker-compose.yml`. Xem [docs/DOKPLOY.md](docs/DOKPLOY.md).
 
 ## Streams
 

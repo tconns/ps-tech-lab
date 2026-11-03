@@ -1,6 +1,6 @@
 # Hướng dẫn deploy PS Tech Lab lên Dokploy
 
-App là SPA React (Vite) đóng gói Docker: build bằng Node, serve bằng nginx cổng **80**.
+App là SPA React (Vite) đóng gói Docker Compose: service `web` build từ `Dockerfile`, nginx lắng nghe cổng **80**.
 
 ## Điều kiện
 
@@ -8,69 +8,94 @@ App là SPA React (Vite) đóng gói Docker: build bằng Node, serve bằng ngi
 - Dokploy đã kết nối được repo đó
 - Domain (tuỳ chọn) đã trỏ về server Dokploy
 
-## 1. Tạo Application trên Dokploy
+## 1. Tạo service Docker Compose trên Dokploy
 
-1. Vào **Projects** → chọn project (hoặc tạo mới) → **Create Service** → **Application**
-2. Chọn nguồn **Git** và repo `ps-tech-lab`
-3. Branch: `main` (hoặc branch bạn dùng)
-4. Build type: **Dockerfile**
-5. Dockerfile path: `Dockerfile` (root repo)
-6. Docker context: `.` (root)
+1. Vào **Projects** → chọn project (hoặc tạo mới) → **Create Service**
+2. Chọn loại **Docker Compose** (không phải Application/Dockerfile đơn)
+3. Nguồn **Git** → repo `ps-tech-lab`
+4. Branch: `develop` (hoặc `main`)
+5. Compose file: `docker-compose.yml` (root repo)
 
-## 2. Port & networking
+Dokploy sẽ `docker compose build` + `up` theo file trong repo.
+
+## 2. Port & domain
 
 | Setting | Value |
 |---------|--------|
+| Service name | `web` |
 | Container port | `80` |
 | Protocol | HTTP |
 
-Trong Dokploy, map publish port / domain tới container port **80**. Không cần thêm env cho v1 (stream đã hardcode).
-
-## 3. Domain (tuỳ chọn)
-
-1. Vào tab **Domains** của application
+1. Vào tab **Domains** của service
 2. Thêm domain (ví dụ `techlab.yourdomain.com`)
-3. Bật HTTPS (Let's Encrypt) nếu Dokploy hỗ trợ trên server của bạn
-4. Trỏ DNS A/CNAME về IP server Dokploy
+3. Trỏ domain tới service / port **80** (Dokploy + Traefik thường tự gắn)
+4. Bật HTTPS (Let's Encrypt) nếu có
 
-## 4. Deploy
+> Nếu deploy bằng Compose mà **không** gắn domain Traefik, compose đang map `80:80` trên host. Đổi port host trong `docker-compose.yml` nếu máy đã chiếm cổng 80.
 
-1. **Deploy** / **Rebuild** application
-2. Đợi build xong (stage `npm ci` + `npm run build`, rồi copy sang nginx)
-3. Mở domain hoặc `http://<server-ip>:<published-port>`
+Không cần biến môi trường cho v1 (stream hardcode trong `src/streams.ts`).
+
+## 3. Deploy
+
+1. **Deploy** / **Rebuild**
+2. Đợi build: `npm ci` → `npm run build` → image nginx
+3. Mở domain hoặc `http://<server-ip>` (nếu map 80)
 
 Kỳ vọng: màn hình đen, **2 video** chia đôi (Big Buck Bunny | Sintel).
 
-## 5. Kiểm tra nhanh
+## 4. Kiểm tra nhanh
 
-- Refresh `/` vẫn vào được app (SPA fallback nginx OK)
-- Console browser không báo lỗi Shaka load (stream Google phải truy cập được từ máy/PS5)
-- Trên PS5: mở trình duyệt → vào URL lab
+- Refresh `/` vẫn vào được app (SPA fallback nginx)
+- Console không báo lỗi Shaka load (`storage.googleapis.com` phải truy cập được)
+- Trên PS5: mở trình duyệt → URL lab
 
-## 6. Chạy local bằng Docker (trước khi lên Dokploy)
+## 5. Chạy local bằng Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-Mở [http://localhost:8080](http://localhost:8080).
+Mở [http://localhost](http://localhost) (port **80**).
 
-Hoặc không Docker:
+Nếu cổng 80 bận, tạm sửa trong `docker-compose.yml`:
+
+```yaml
+ports:
+  - "8080:80"
+```
+
+Rồi mở [http://localhost:8080](http://localhost:8080).
+
+Không Docker:
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 7. Đổi stream sau này
+## 6. Đổi stream sau này
 
-Sửa file `src/streams.ts`, commit, push — Dokploy rebuild sẽ lấy URL mới.
+Sửa `src/streams.ts` → commit → push → Deploy lại trên Dokploy.
+
+## Cấu trúc Compose
+
+```yaml
+services:
+  web:          # SPA + nginx
+    build: .    # Dockerfile multi-stage
+    ports:
+      - "80:80"
+```
+
+Chỉ một service — đủ cho lab static.
 
 ## Sự cố thường gặp
 
 | Triệu chứng | Cách xử lý |
 |-------------|------------|
-| Build fail `npm ci` | Kiểm tra `package-lock.json` đã commit |
+| Dokploy không thấy Compose | Chọn đúng loại **Docker Compose**, path `docker-compose.yml` |
+| Build fail `npm ci` | Commit đủ `package-lock.json` |
+| Port 80 already allocated | Đổi host port trong `ports`, hoặc chỉ dùng Domain/Traefik |
 | 404 khi refresh route | Kiểm tra `nginx.conf` có `try_files ... /index.html` |
-| Video không chạy | Kiểm tra mạng tới `storage.googleapis.com`; PS5 có thể chặn autoplay unmuted — app đã `muted` |
-| Màn đen mãi | Mở DevTools/remote debug xem lỗi Shaka; thử lại trên desktop trước |
+| Video không chạy | Kiểm tra mạng tới Google Storage; app đã `muted` cho autoplay |
+| Màn đen mãi | Debug trên desktop trước, rồi thử PS5 |
