@@ -4,10 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ps-tech-lab:latest
-    container_name: ps-tech-lab
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # Không bind host port — Dokploy/Traefik route qua domain vào cổng 80 trong mạng compose
+    expose:
+      - "80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s
