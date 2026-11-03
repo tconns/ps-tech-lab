@@ -111,7 +111,7 @@ export function CanvasPreviewPane({ source, label = 'canvas' }: CanvasPreviewPan
                 setError(
                   'MSE→canvas black on PS5 (no captureStream). Use DUAL_MODE=shaka-mp4 for a real 2nd picture.',
                 )
-                running = false
+                // Stop rAF loop — do not schedule another frame.
                 return
               }
             }
