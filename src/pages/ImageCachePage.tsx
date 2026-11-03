@@ -3,6 +3,7 @@ import {
   closeImageCacheWorker,
   downloadAndStoreImage,
   readCachedImage,
+  shrinkCachedImage,
 } from '../imageCache/imageCacheClient'
 import { IMAGE_BYTES_HEADER } from '../imageCache/protocol'
 import { LabTraceOverlay } from '../lab/LabTraceOverlay'
@@ -12,7 +13,7 @@ import { STREAMS } from '../streams'
 const LIST_SIZE = 20
 
 const SAMPLES = [
-  { label: 'favicon', url: '/favicon.svg' },
+  { label: 'favicon', url: '/favicon.svg?n=0' },
   ...Array.from({ length: LIST_SIZE }, (_, index) => ({
     label: `poster ${index + 1}`,
     url: `/lab-poster.svg?n=${index + 1}`,
@@ -99,16 +100,22 @@ export function ImageCachePage() {
             return
           }
           if (cached) {
+            const shrunk = await withTimeout(shrinkCachedImage(url, cached), STEP_MS)
+            if (cancelled) {
+              URL.revokeObjectURL(shrunk.image.blobUrl)
+              return
+            }
             const ms = Math.round(performance.now() - t0)
             hits += 1
-            blobs.push(cached.blobUrl)
-            labTrace('img', `${sample.label} HIT ${cached.bytes}B ${ms}ms`)
+            blobs.push(shrunk.image.blobUrl)
+            const note = shrunk.note ? ` ${shrunk.note}` : ''
+            labTrace('img', `${sample.label} HIT ${shrunk.bytes}B ${ms}ms${note}`)
             patch(index, {
               phase: 'ok',
               source: 'cache',
-              bytes: cached.bytes,
+              bytes: shrunk.bytes,
               ms,
-              blobUrl: cached.blobUrl,
+              blobUrl: shrunk.image.blobUrl,
             })
             continue
           }
@@ -117,11 +124,11 @@ export function ImageCachePage() {
           labTrace('img', `${sample.label} MISS — worker download`)
           patch(index, { phase: 'downloading' })
           const fetchStarted = performance.now()
-          const bytes = await withTimeout(downloadAndStoreImage(url), STEP_MS)
+          const stored = await withTimeout(downloadAndStoreImage(url), STEP_MS)
           const fetchMs = Math.round(performance.now() - fetchStarted)
           if (cancelled) return
 
-          patch(index, { phase: 'storing', bytes })
+          patch(index, { phase: 'storing', bytes: stored.bytes })
           const image = await withTimeout(readCachedImage(url), STEP_MS)
           if (!image) {
             throw new Error('cache miss after put')
@@ -132,7 +139,8 @@ export function ImageCachePage() {
           }
           const ms = Math.round(performance.now() - t0)
           blobs.push(image.blobUrl)
-          labTrace('img', `${sample.label} stored ${bytes}B fetch+put ${fetchMs}ms total ${ms}ms`)
+          const note = stored.note ? ` ${stored.note}` : ''
+          labTrace('img', `${sample.label} stored ${stored.bytes}B fetch+put ${fetchMs}ms total ${ms}ms${note}`)
           patch(index, {
             phase: 'ok',
             source: 'network',
