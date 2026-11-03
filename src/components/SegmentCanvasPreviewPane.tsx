@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { labTrace } from '../lab/labTrace'
-import { decodeSegmentPreviewToCanvas } from '../player/decodeSegmentPreview'
+import { playSegmentOnCanvas } from '../player/decodeSegmentPreview'
 
 type SegmentCanvasPreviewPaneProps = {
   src: string
   label?: string
-  /** When false, wait (e.g. until Shaka is playing) before decoding. */
+  /** When false, wait (e.g. until Shaka is playing) before starting playback. */
   active?: boolean
 }
 
-type Status = 'idle' | 'loading' | 'ok' | 'error'
+type Status = 'idle' | 'loading' | 'playing' | 'error'
 
 /**
- * Approach C: fetch fMP4 → mp4box → WebCodecs → canvas (no 2nd `<video>`).
+ * Approach C (playable): fMP4 → mp4box → WebCodecs → canvas, looping.
+ * Not a still thumb — continuous decode/present without a 2nd `<video>`.
  */
 export function SegmentCanvasPreviewPane({
   src,
@@ -35,31 +36,39 @@ export function SegmentCanvasPreviewPane({
     const canvas = canvasRef.current
     if (!canvas) return
 
-    let cancelled = false
+    let stopped = false
+    let stopPlayer: (() => void) | null = null
     setStatus('loading')
     setError(null)
-    labTrace(label, 'start segment→WebCodecs→canvas', {
+    labTrace(label, 'start playable segment→WebCodecs→canvas', {
       hasVideoDecoder: typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === 'function',
     })
 
-    void decodeSegmentPreviewToCanvas(src, canvas, { maxFrames: 1, label })
-      .then((result) => {
-        if (cancelled) return
-        setStatus('ok')
-        setMeta(`${result.codec} ${result.width}x${result.height} frames=${result.frames}`)
-        labTrace(label, 'preview ok', result)
+    void playSegmentOnCanvas(src, canvas, { label })
+      .then((handle) => {
+        if (stopped) {
+          handle.stop()
+          return
+        }
+        stopPlayer = handle.stop
+        setStatus('playing')
+        setMeta(
+          `${handle.meta.codec} ${handle.meta.width}x${handle.meta.height} ${handle.meta.durationSec.toFixed(1)}s loop`,
+        )
+        labTrace(label, 'canvas player running', handle.meta)
       })
       .catch((err) => {
-        if (cancelled) return
+        if (stopped) return
         const msg = err instanceof Error ? err.message : String(err)
         setStatus('error')
         setError(msg)
-        labTrace(label, `preview failed: ${msg}`, err)
+        labTrace(label, `canvas player failed: ${msg}`, err)
       })
 
     return () => {
-      cancelled = true
-      labTrace(label, 'cleanup segment preview')
+      stopped = true
+      stopPlayer?.()
+      labTrace(label, 'cleanup canvas player')
     }
   }, [src, label, active])
 
@@ -69,7 +78,7 @@ export function SegmentCanvasPreviewPane({
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>
-        <span className="pane__engine">mp4box+webcodecs</span>
+        <span className="pane__engine">webcodecs play</span>
         {meta ? <span>{meta}</span> : null}
         {error ? <span className="pane__err">{error}</span> : null}
       </div>

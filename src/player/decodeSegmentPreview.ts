@@ -1,11 +1,24 @@
 import { createFile, DataStream, Endianness, MP4BoxBuffer } from 'mp4box'
 import { labTrace } from '../lab/labTrace'
 
-export type SegmentPreviewResult = {
-  frames: number
-  codec: string
-  width: number
-  height: number
+export type SegmentPlayerHandle = {
+  stop: () => void
+  meta: {
+    codec: string
+    width: number
+    height: number
+    sampleCount: number
+    durationSec: number
+  }
+}
+
+type SampleInfo = {
+  offset: number
+  size: number
+  cts: number
+  duration: number
+  is_sync: boolean
+  timescale: number
 }
 
 function getAvcDescription(file: ReturnType<typeof createFile>, trackId: number): Uint8Array {
@@ -19,24 +32,27 @@ function getAvcDescription(file: ReturnType<typeof createFile>, trackId: number)
   return new Uint8Array(stream.buffer, 8, stream.byteLength - 8)
 }
 
+function toUs(units: number, timescale: number): number {
+  return Math.round((units / timescale) * 1_000_000)
+}
+
 /**
- * Fetch on-demand H.264 MP4 → mp4box demux → WebCodecs → canvas.
- * No `<video>` / MSE. Lab test: can PS5 paint a preview without killing Shaka?
+ * Continuous preview player: fMP4 → mp4box → WebCodecs → canvas (loops).
+ * No second `<video>` / MSE.
  */
-export async function decodeSegmentPreviewToCanvas(
+export async function playSegmentOnCanvas(
   url: string,
   canvas: HTMLCanvasElement,
-  options?: { maxFrames?: number; label?: string },
-): Promise<SegmentPreviewResult> {
+  options?: { label?: string },
+): Promise<SegmentPlayerHandle> {
   const label = options?.label ?? 'webcodecs'
-  const maxFrames = options?.maxFrames ?? 1
 
   const VideoDecoderCtor = (globalThis as { VideoDecoder?: typeof VideoDecoder }).VideoDecoder
   if (typeof VideoDecoderCtor !== 'function') {
     throw new Error('WebCodecs VideoDecoder not available')
   }
 
-  labTrace(label, 'fetch segment mp4', url)
+  labTrace(label, 'fetch segment mp4 (full play)', url)
   const ab = await fetch(url).then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return r.arrayBuffer()
@@ -67,50 +83,29 @@ export async function decodeSegmentPreviewToCanvas(
   const width = track.video?.width ?? track.track_width ?? 250
   const height = track.video?.height ?? track.track_height ?? 144
   const codec = track.codec
-  labTrace(label, 'mp4box ready', {
+  const samples = (file.getTrackSamplesInfo(track.id) ?? []) as SampleInfo[]
+  if (samples.length === 0) throw new Error('no samples')
+
+  const timescale = samples[0]!.timescale || 15360
+  const last = samples[samples.length - 1]!
+  const durationUnits = last.cts + last.duration
+  const durationUs = toUs(durationUnits, timescale)
+  const durationSec = durationUs / 1_000_000
+
+  labTrace(label, 'mp4box ready for play', {
     id: track.id,
     codec,
     width,
     height,
-    samples: track.nb_samples,
+    samples: samples.length,
+    durationSec: Number(durationSec.toFixed(2)),
   })
 
   const description = getAvcDescription(file, track.id)
-  labTrace(label, `avcC description bytes=${description.byteLength}`)
-
-  const sampleInfos = file.getTrackSamplesInfo(track.id) ?? []
-  const syncSamples = sampleInfos.filter((s) => s.is_sync).slice(0, maxFrames)
-  if (syncSamples.length === 0) throw new Error('no sync samples')
-  labTrace(label, `using ${syncSamples.length} sync sample(s)`, {
-    first: { offset: syncSamples[0]?.offset, size: syncSamples[0]?.size },
-  })
-
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('2d context unavailable')
   canvas.width = width
   canvas.height = height
-
-  let frames = 0
-  let decoderError: Error | null = null
-
-  const decoder = new VideoDecoderCtor({
-    output: (frame) => {
-      try {
-        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
-        frames += 1
-        labTrace(label, `decoded frame #${frames}`, {
-          w: frame.displayWidth,
-          h: frame.displayHeight,
-        })
-      } finally {
-        frame.close()
-      }
-    },
-    error: (err) => {
-      decoderError = err instanceof Error ? err : new Error(String(err))
-      labTrace(label, 'VideoDecoder error', err)
-    },
-  })
 
   const config: VideoDecoderConfig = {
     codec,
@@ -123,35 +118,117 @@ export async function decodeSegmentPreviewToCanvas(
       ? await VideoDecoderCtor.isConfigSupported(config)
       : { supported: true }
   labTrace(label, 'VideoDecoder.isConfigSupported', support)
-  if (support.supported === false) {
-    throw new Error(`codec not supported: ${codec}`)
-  }
+  if (support.supported === false) throw new Error(`codec not supported: ${codec}`)
 
+  let stopped = false
+  let sampleIndex = 0
+  let loopIndex = 0
+  let framesDrawn = 0
+  let pending: VideoFrame[] = []
+  let wallStart = 0
+  let raf = 0
+
+  const decoder = new VideoDecoderCtor({
+    output: (frame) => {
+      if (stopped) {
+        frame.close()
+        return
+      }
+      pending.push(frame)
+      pending.sort((a, b) => a.timestamp - b.timestamp)
+      // Cap queue to avoid RAM blow-up on slow present.
+      while (pending.length > 45) {
+        pending.shift()?.close()
+      }
+    },
+    error: (err) => {
+      labTrace(label, 'VideoDecoder error', err)
+    },
+  })
   decoder.configure(config)
 
-  for (const sample of syncSamples) {
-    const data = new Uint8Array(ab, sample.offset, sample.size)
-    const chunk = new EncodedVideoChunk({
-      type: 'key',
-      timestamp: sample.cts,
-      duration: sample.duration,
-      data,
-    })
-    decoder.decode(chunk)
-    labTrace(label, 'submitted key chunk', { bytes: data.byteLength, cts: sample.cts })
-  }
-
-  try {
-    await decoder.flush()
-  } finally {
-    try {
-      decoder.close()
-    } catch {
-      /* ignore */
+  const pumpDecode = () => {
+    if (stopped) return
+    while (decoder.decodeQueueSize < 12) {
+      if (sampleIndex >= samples.length) {
+        sampleIndex = 0
+        loopIndex += 1
+        labTrace(label, `loop #${loopIndex}`)
+      }
+      const sample = samples[sampleIndex]!
+      const data = new Uint8Array(ab, sample.offset, sample.size)
+      const baseUs = toUs(sample.cts, timescale)
+      const timestamp = baseUs + loopIndex * durationUs
+      const chunk = new EncodedVideoChunk({
+        type: sample.is_sync ? 'key' : 'delta',
+        timestamp,
+        duration: toUs(sample.duration, timescale),
+        data,
+      })
+      try {
+        decoder.decode(chunk)
+      } catch (err) {
+        labTrace(label, 'decode() threw', err)
+        break
+      }
+      sampleIndex += 1
     }
   }
 
-  if (decoderError) throw decoderError
-  if (frames === 0) throw new Error('no frames decoded')
-  return { frames, codec, width, height }
+  const present = (now: number) => {
+    if (stopped) return
+    if (!wallStart) wallStart = now
+    // Media time along the looping timeline (microseconds).
+    const mediaUs = ((now - wallStart) * 1000) % Math.max(durationUs, 1)
+
+    while (pending.length > 0) {
+      const frame = pending[0]!
+      const localTs = frame.timestamp % Math.max(durationUs, 1)
+      // Allow slight lead so we don't stall.
+      if (localTs > mediaUs + 80_000 && mediaUs > 40_000) break
+      pending.shift()
+      try {
+        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
+        framesDrawn += 1
+        if (framesDrawn === 1 || framesDrawn % 60 === 0) {
+          labTrace(label, `playing frame #${framesDrawn}`, {
+            mediaSec: Number((mediaUs / 1e6).toFixed(2)),
+            pending: pending.length,
+            decodeQ: decoder.decodeQueueSize,
+          })
+        }
+      } finally {
+        frame.close()
+      }
+    }
+
+    pumpDecode()
+    raf = requestAnimationFrame(present)
+  }
+
+  labTrace(label, 'start continuous WebCodecs→canvas play (loop)')
+  pumpDecode()
+  raf = requestAnimationFrame(present)
+
+  return {
+    meta: {
+      codec,
+      width,
+      height,
+      sampleCount: samples.length,
+      durationSec,
+    },
+    stop: () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      for (const frame of pending) frame.close()
+      pending = []
+      try {
+        decoder.close()
+      } catch {
+        /* ignore */
+      }
+      labTrace(label, 'stopped canvas player', { framesDrawn })
+    },
+  }
 }
