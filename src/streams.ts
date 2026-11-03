@@ -7,28 +7,30 @@ export const STREAMS = {
   rightMp4: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   leftMp4: 'https://www.w3schools.com/html/mov_bbb.mp4',
   rightPoster: 'https://peach.blender.org/wp-content/uploads/poster_bunny_big.jpg',
-  /**
-   * Small on-demand H.264 MP4 (144p) for WebCodecs segment→canvas preview (approach C).
-   * Different file from left ABR ladder but same title family — fine for decoder-conflict test.
-   */
   previewSegment:
     'https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths/v-0144p-0100k-libx264.mp4',
 } as const
 
 /**
- * PS5 findings + experiment modes.
- * Default `shaka-webcodecs`: left Shaka; right = mp4box+WebCodecs→canvas (no 2nd `<video>`).
+ * PS5 WebView lab conclusions (device-proven):
+ * - 1 HW video decoder: 2nd `<video>` (MSE or MP4) → left 3015
+ * - no captureStream; MSE→canvas drawImage = black frames
+ * - no WebCodecs VideoDecoder
+ * - no WebAssembly → TinyH264/WASM soft-decode also impossible
+ *
+ * Safe dual-*pane* default: `shaka-telemetry` (Shaka + poster/telemetry).
+ * Dual live video decode is not available on this runtime.
  */
 export type DualMode =
-  | 'shaka-webcodecs'
   | 'shaka-telemetry'
+  | 'shaka-webcodecs'
   | 'shaka-mp4'
   | 'shaka-canvas'
   | 'hybrid'
   | 'dual-mse'
   | 'dual-native'
 
-export const DUAL_MODE: DualMode = 'shaka-webcodecs'
+export const DUAL_MODE: DualMode = 'shaka-telemetry'
 
 export const ENABLED_PANES = {
   left: true,

@@ -41,7 +41,14 @@ export async function playSegmentOnCanvas(
 
   const hasWebCodecs =
     typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === 'function'
-  labTrace(label, 'decoder probe', { hasWebCodecs, engine: 'tinyh264' })
+  const hasWasm = typeof WebAssembly === 'object' && WebAssembly != null
+  labTrace(label, 'decoder probe', { hasWebCodecs, hasWasm, engine: 'tinyh264' })
+
+  if (!hasWasm) {
+    throw new Error(
+      'WebAssembly not available — TinyH264 soft-decode impossible on this PS5 WebView',
+    )
+  }
 
   labTrace(label, 'fetch segment mp4 (full play)', url)
   const ab = await fetch(url).then((r) => {

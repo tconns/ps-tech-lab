@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PlatformDetector } from '@osiris-smarttv/device'
 import { CanvasPreviewPane } from '../components/CanvasPreviewPane'
 import { NativePlayerPane } from '../components/NativePlayerPane'
@@ -6,6 +6,7 @@ import { PlayerPane } from '../components/PlayerPane'
 import { SegmentCanvasPreviewPane } from '../components/SegmentCanvasPreviewPane'
 import { TelemetryPreviewPane } from '../components/TelemetryPreviewPane'
 import { isPs5Runtime } from '../device'
+import { canSoftDecodePreview, probeLabCapabilities } from '../lab/capabilities'
 import { LabTraceOverlay } from '../lab/LabTraceOverlay'
 import { labTrace } from '../lab/labTrace'
 import {
@@ -13,30 +14,42 @@ import {
   ENABLED_PANES,
   SECOND_PLAYER_DELAY_MS,
   STREAMS,
+  type DualMode,
 } from '../streams'
+
+function resolveMode(requested: DualMode): DualMode {
+  if (requested !== 'shaka-webcodecs') return requested
+  if (canSoftDecodePreview()) return requested
+  labTrace(
+    'caps',
+    'shaka-webcodecs unavailable (no WASM / VideoDecoder) — falling back to shaka-telemetry',
+  )
+  return 'shaka-telemetry'
+}
 
 /**
  * Dual-pane lab for PS5.
- *
- * Default `shaka-webcodecs`: Shaka left + mp4box/WebCodecs→canvas right (approach C).
- * Starts WebCodecs after left is playing to see if HW decoder is stolen (3015).
+ * Default safe mode: Shaka + telemetry/poster (no 2nd decoder / WASM / WebCodecs).
  */
 export function DualPlayerPage() {
-  const needsGate =
-    DUAL_MODE !== 'shaka-telemetry' && DUAL_MODE !== 'shaka-canvas'
+  const mode = useMemo(() => resolveMode(DUAL_MODE), [])
+  const needsGate = mode !== 'shaka-telemetry' && mode !== 'shaka-canvas'
   const [rightActive, setRightActive] = useState(!needsGate)
   const [shakaVideo, setShakaVideo] = useState<HTMLVideoElement | null>(null)
 
   useEffect(() => {
+    const caps = probeLabCapabilities()
     const detected = PlatformDetector.detect()
     labTrace('page', 'DualPlayer mounted', {
       platform: detected.platform,
       isPs5Runtime: isPs5Runtime(),
-      mode: DUAL_MODE,
+      requestedMode: DUAL_MODE,
+      effectiveMode: mode,
+      caps,
       enabled: ENABLED_PANES,
       secondDelayMs: SECOND_PLAYER_DELAY_MS,
     })
-  }, [])
+  }, [mode])
 
   const onVideoElement = useCallback((video: HTMLVideoElement | null) => {
     setShakaVideo(video)
@@ -45,20 +58,20 @@ export function DualPlayerPage() {
 
   const onLeftPlaying = useCallback(() => {
     if (!needsGate) {
-      labTrace('gate', `shaka playing — right pane is ${DUAL_MODE}`)
+      labTrace('gate', `shaka playing — right pane is ${mode}`)
       return
     }
     if (!ENABLED_PANES.right) return
-    labTrace('gate', `left playing — arm right (${DUAL_MODE}) in ${SECOND_PLAYER_DELAY_MS}ms`)
+    labTrace('gate', `left playing — arm right (${mode}) in ${SECOND_PLAYER_DELAY_MS}ms`)
     window.setTimeout(() => {
       labTrace('gate', 'activate right preview/player')
       setRightActive(true)
     }, SECOND_PLAYER_DELAY_MS)
-  }, [needsGate])
+  }, [needsGate, mode])
 
   const onRightPlaying = useCallback(() => {
-    labTrace('gate', `both panes reported playing (mode=${DUAL_MODE})`)
-  }, [])
+    labTrace('gate', `both panes reported playing (mode=${mode})`)
+  }, [mode])
 
   const onLeftError = useCallback((message: string) => {
     labTrace('gate', 'left error', message)
@@ -68,11 +81,10 @@ export function DualPlayerPage() {
     labTrace('gate', 'right error', message)
   }, [])
 
-  const shareVideo =
-    DUAL_MODE === 'shaka-telemetry' || DUAL_MODE === 'shaka-canvas'
+  const shareVideo = mode === 'shaka-telemetry' || mode === 'shaka-canvas'
 
   const left =
-    DUAL_MODE === 'dual-native' ? (
+    mode === 'dual-native' ? (
       <NativePlayerPane
         src={STREAMS.leftMp4}
         kind="mp4"
@@ -93,7 +105,7 @@ export function DualPlayerPage() {
     )
 
   let right: React.ReactNode
-  if (DUAL_MODE === 'shaka-webcodecs') {
+  if (mode === 'shaka-webcodecs') {
     right = (
       <SegmentCanvasPreviewPane
         src={STREAMS.previewSegment}
@@ -101,7 +113,7 @@ export function DualPlayerPage() {
         active={rightActive}
       />
     )
-  } else if (DUAL_MODE === 'shaka-telemetry') {
+  } else if (mode === 'shaka-telemetry') {
     right = (
       <TelemetryPreviewPane
         source={shakaVideo}
@@ -109,9 +121,9 @@ export function DualPlayerPage() {
         posterUrl={STREAMS.rightPoster}
       />
     )
-  } else if (DUAL_MODE === 'shaka-canvas') {
+  } else if (mode === 'shaka-canvas') {
     right = <CanvasPreviewPane source={shakaVideo} label="right" />
-  } else if (DUAL_MODE === 'dual-mse') {
+  } else if (mode === 'dual-mse') {
     right = (
       <PlayerPane
         src={STREAMS.rightDash}
@@ -121,11 +133,11 @@ export function DualPlayerPage() {
         onError={onRightError}
       />
     )
-  } else if (DUAL_MODE === 'shaka-mp4' || DUAL_MODE === 'hybrid') {
+  } else if (mode === 'shaka-mp4' || mode === 'hybrid') {
     right = (
       <NativePlayerPane
-        src={DUAL_MODE === 'shaka-mp4' ? STREAMS.rightMp4 : STREAMS.rightHls}
-        kind={DUAL_MODE === 'shaka-mp4' ? 'mp4' : 'hls'}
+        src={mode === 'shaka-mp4' ? STREAMS.rightMp4 : STREAMS.rightHls}
+        kind={mode === 'shaka-mp4' ? 'mp4' : 'hls'}
         label="right"
         active={rightActive}
         onPlaying={onRightPlaying}
