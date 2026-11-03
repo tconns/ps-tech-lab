@@ -1,5 +1,11 @@
-import { createFile, DataStream, Endianness, MP4BoxBuffer } from 'mp4box'
+import { createFile, MP4BoxBuffer } from 'mp4box'
+// @ts-expect-error tinyh264 ships without types
+import TinyH264Factory from 'tinyh264/es/TinyH264.js'
+// @ts-expect-error tinyh264 ships without types
+import TinyH264Decoder from 'tinyh264/es/TinyH264Decoder.js'
 import { labTrace } from '../lab/labTrace'
+import { avccSampleToAnnexB, parameterSetsToAnnexB } from './avcAnnexB'
+import { drawI420ToCanvas } from './yuvCanvas'
 
 export type SegmentPlayerHandle = {
   stop: () => void
@@ -9,6 +15,7 @@ export type SegmentPlayerHandle = {
     height: number
     sampleCount: number
     durationSec: number
+    engine: 'tinyh264'
   }
 }
 
@@ -21,36 +28,20 @@ type SampleInfo = {
   timescale: number
 }
 
-function getAvcDescription(file: ReturnType<typeof createFile>, trackId: number): Uint8Array {
-  const trak = file.getTrackById(trackId)
-  const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0] as
-    | { avcC?: { write: (s: InstanceType<typeof DataStream>) => void } }
-    | undefined
-  if (!entry?.avcC) throw new Error('avcC description not found')
-  const stream = new DataStream(undefined, 0, Endianness.BIG_ENDIAN)
-  entry.avcC.write(stream)
-  return new Uint8Array(stream.buffer, 8, stream.byteLength - 8)
-}
-
-function toUs(units: number, timescale: number): number {
-  return Math.round((units / timescale) * 1_000_000)
-}
-
 /**
- * Continuous preview player: fMP4 → mp4box → WebCodecs → canvas (loops).
- * No second `<video>` / MSE.
+ * PS5 has no WebCodecs VideoDecoder. Soft-decode baseline H.264 with TinyH264 WASM
+ * and paint YUV→canvas in a timed loop (playable preview, no 2nd `<video>`).
  */
 export async function playSegmentOnCanvas(
   url: string,
   canvas: HTMLCanvasElement,
   options?: { label?: string },
 ): Promise<SegmentPlayerHandle> {
-  const label = options?.label ?? 'webcodecs'
+  const label = options?.label ?? 'preview'
 
-  const VideoDecoderCtor = (globalThis as { VideoDecoder?: typeof VideoDecoder }).VideoDecoder
-  if (typeof VideoDecoderCtor !== 'function') {
-    throw new Error('WebCodecs VideoDecoder not available')
-  }
+  const hasWebCodecs =
+    typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === 'function'
+  labTrace(label, 'decoder probe', { hasWebCodecs, engine: 'tinyh264' })
 
   labTrace(label, 'fetch segment mp4 (full play)', url)
   const ab = await fetch(url).then((r) => {
@@ -65,7 +56,6 @@ export async function playSegmentOnCanvas(
       id: number
       codec: string
       type?: string
-      nb_samples?: number
       video?: { width: number; height: number }
       track_width?: number
       track_height?: number
@@ -80,155 +70,120 @@ export async function playSegmentOnCanvas(
   const track = info.tracks.find((t) => t.video || t.type === 'video')
   if (!track) throw new Error('no video track')
 
-  const width = track.video?.width ?? track.track_width ?? 250
-  const height = track.video?.height ?? track.track_height ?? 144
-  const codec = track.codec
   const samples = (file.getTrackSamplesInfo(track.id) ?? []) as SampleInfo[]
   if (samples.length === 0) throw new Error('no samples')
 
+  const entry = file.getTrackById(track.id)?.mdia?.minf?.stbl?.stsd?.entries?.[0] as
+    | {
+        avcC?: {
+          lengthSizeMinusOne: number
+          SPS: Array<{ data: Uint8Array }>
+          PPS: Array<{ data: Uint8Array }>
+        }
+      }
+    | undefined
+  if (!entry?.avcC) throw new Error('avcC missing (need baseline/avc1)')
+
+  const spsPps = parameterSetsToAnnexB([
+    ...entry.avcC.SPS.map((s) => s.data),
+    ...entry.avcC.PPS.map((p) => p.data),
+  ])
+  const naluLengthSize = (entry.avcC.lengthSizeMinusOne & 3) + 1
+  const width = track.video?.width ?? track.track_width ?? 250
+  const height = track.video?.height ?? track.track_height ?? 144
   const timescale = samples[0]!.timescale || 15360
   const last = samples[samples.length - 1]!
-  const durationUnits = last.cts + last.duration
-  const durationUs = toUs(durationUnits, timescale)
-  const durationSec = durationUs / 1_000_000
+  const durationUs = Math.round(((last.cts + last.duration) / timescale) * 1_000_000)
 
-  labTrace(label, 'mp4box ready for play', {
-    id: track.id,
-    codec,
+  labTrace(label, 'mp4box ready for tinyh264 play', {
+    codec: track.codec,
     width,
     height,
     samples: samples.length,
-    durationSec: Number(durationSec.toFixed(2)),
+    durationSec: Number((durationUs / 1e6).toFixed(2)),
+    naluLengthSize,
   })
 
-  const description = getAvcDescription(file, track.id)
+  labTrace(label, 'init TinyH264 WASM')
+  const module = await TinyH264Factory()
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('2d context unavailable')
-  canvas.width = width
-  canvas.height = height
 
-  const config: VideoDecoderConfig = {
-    codec,
-    codedWidth: width,
-    codedHeight: height,
-    description,
-  }
-  const support =
-    typeof VideoDecoderCtor.isConfigSupported === 'function'
-      ? await VideoDecoderCtor.isConfigSupported(config)
-      : { supported: true }
-  labTrace(label, 'VideoDecoder.isConfigSupported', support)
-  if (support.supported === false) throw new Error(`codec not supported: ${codec}`)
+  let framesDrawn = 0
+  const decoder = new TinyH264Decoder(
+    module,
+    (yuv: Uint8Array, w: number, h: number) => {
+      drawI420ToCanvas(ctx, yuv, w, h)
+      framesDrawn += 1
+      if (framesDrawn === 1 || framesDrawn % 60 === 0) {
+        labTrace(label, `tinyh264 frame #${framesDrawn}`, { w, h })
+      }
+    },
+  )
+  decoder.decode(spsPps)
 
   let stopped = false
   let sampleIndex = 0
   let loopIndex = 0
-  let framesDrawn = 0
-  let pending: VideoFrame[] = []
   let wallStart = 0
-  let raf = 0
+  let timer = 0
 
-  const decoder = new VideoDecoderCtor({
-    output: (frame) => {
-      if (stopped) {
-        frame.close()
-        return
-      }
-      pending.push(frame)
-      pending.sort((a, b) => a.timestamp - b.timestamp)
-      // Cap queue to avoid RAM blow-up on slow present.
-      while (pending.length > 45) {
-        pending.shift()?.close()
-      }
-    },
-    error: (err) => {
-      labTrace(label, 'VideoDecoder error', err)
-    },
-  })
-  decoder.configure(config)
-
-  const pumpDecode = () => {
+  const tick = () => {
     if (stopped) return
-    while (decoder.decodeQueueSize < 12) {
+    const now = performance.now()
+    if (!wallStart) wallStart = now
+    const mediaUs = ((now - wallStart) * 1000) % Math.max(durationUs, 1)
+
+    let decoded = 0
+    while (decoded < 3) {
       if (sampleIndex >= samples.length) {
         sampleIndex = 0
         loopIndex += 1
-        labTrace(label, `loop #${loopIndex}`)
+        wallStart = now
+        labTrace(label, `tinyh264 loop #${loopIndex}`)
+        decoder.decode(spsPps)
+        break
       }
       const sample = samples[sampleIndex]!
-      const data = new Uint8Array(ab, sample.offset, sample.size)
-      const baseUs = toUs(sample.cts, timescale)
-      const timestamp = baseUs + loopIndex * durationUs
-      const chunk = new EncodedVideoChunk({
-        type: sample.is_sync ? 'key' : 'delta',
-        timestamp,
-        duration: toUs(sample.duration, timescale),
-        data,
-      })
+      const sampleUs = Math.round((sample.cts / timescale) * 1_000_000)
+      if (sampleUs > mediaUs + 40_000 && mediaUs > 20_000) break
+
+      const avcc = new Uint8Array(ab, sample.offset, sample.size)
+      const annexB = avccSampleToAnnexB(avcc, naluLengthSize)
       try {
-        decoder.decode(chunk)
+        decoder.decode(annexB)
       } catch (err) {
-        labTrace(label, 'decode() threw', err)
+        labTrace(label, 'tinyh264 decode threw', err)
         break
       }
       sampleIndex += 1
-    }
-  }
-
-  const present = (now: number) => {
-    if (stopped) return
-    if (!wallStart) wallStart = now
-    // Media time along the looping timeline (microseconds).
-    const mediaUs = ((now - wallStart) * 1000) % Math.max(durationUs, 1)
-
-    while (pending.length > 0) {
-      const frame = pending[0]!
-      const localTs = frame.timestamp % Math.max(durationUs, 1)
-      // Allow slight lead so we don't stall.
-      if (localTs > mediaUs + 80_000 && mediaUs > 40_000) break
-      pending.shift()
-      try {
-        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
-        framesDrawn += 1
-        if (framesDrawn === 1 || framesDrawn % 60 === 0) {
-          labTrace(label, `playing frame #${framesDrawn}`, {
-            mediaSec: Number((mediaUs / 1e6).toFixed(2)),
-            pending: pending.length,
-            decodeQ: decoder.decodeQueueSize,
-          })
-        }
-      } finally {
-        frame.close()
-      }
+      decoded += 1
     }
 
-    pumpDecode()
-    raf = requestAnimationFrame(present)
+    timer = window.setTimeout(tick, 8)
   }
 
-  labTrace(label, 'start continuous WebCodecs→canvas play (loop)')
-  pumpDecode()
-  raf = requestAnimationFrame(present)
+  labTrace(label, 'start TinyH264→canvas play (loop)')
+  timer = window.setTimeout(tick, 0)
 
   return {
     meta: {
-      codec,
+      codec: track.codec,
       width,
       height,
       sampleCount: samples.length,
-      durationSec,
+      durationSec: durationUs / 1e6,
+      engine: 'tinyh264',
     },
     stop: () => {
       stopped = true
-      cancelAnimationFrame(raf)
-      for (const frame of pending) frame.close()
-      pending = []
+      window.clearTimeout(timer)
       try {
-        decoder.close()
+        decoder.release()
       } catch {
         /* ignore */
       }
-      labTrace(label, 'stopped canvas player', { framesDrawn })
+      labTrace(label, 'stopped tinyh264 player', { framesDrawn })
     },
   }
 }

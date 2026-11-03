@@ -40,9 +40,7 @@ export function SegmentCanvasPreviewPane({
     let stopPlayer: (() => void) | null = null
     setStatus('loading')
     setError(null)
-    labTrace(label, 'start playable segment→WebCodecs→canvas', {
-      hasVideoDecoder: typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === 'function',
-    })
+    labTrace(label, 'start playable segment→TinyH264 WASM→canvas (no VideoDecoder on PS5)')
 
     void playSegmentOnCanvas(src, canvas, { label })
       .then((handle) => {
@@ -53,7 +51,7 @@ export function SegmentCanvasPreviewPane({
         stopPlayer = handle.stop
         setStatus('playing')
         setMeta(
-          `${handle.meta.codec} ${handle.meta.width}x${handle.meta.height} ${handle.meta.durationSec.toFixed(1)}s loop`,
+          `${handle.meta.engine} ${handle.meta.codec} ${handle.meta.width}x${handle.meta.height} ${handle.meta.durationSec.toFixed(1)}s loop`,
         )
         labTrace(label, 'canvas player running', handle.meta)
       })
@@ -78,7 +76,7 @@ export function SegmentCanvasPreviewPane({
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>
-        <span className="pane__engine">webcodecs play</span>
+        <span className="pane__engine">tinyh264 wasm</span>
         {meta ? <span>{meta}</span> : null}
         {error ? <span className="pane__err">{error}</span> : null}
       </div>
