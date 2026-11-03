@@ -36,11 +36,12 @@ Kết luận lab (PS5 FW 13, đã reproduce):
 - Bật **MP4 native thứ 2** khi Shaka đang play → left 3015 ngay (`Media failed to decode`)
 - ⇒ **1 HW video decoder** — không decode 2 video song song
 
-Mặc định `DUAL_MODE = 'shaka-telemetry'`:
-- **left:** Shaka MSE (decode thật)
-- **right:** poster + telemetry từ cùng `<video>` (không decoder 2)
+Mặc định thí nghiệm `DUAL_MODE = 'shaka-webcodecs'` (cách C):
+- **left:** Shaka MSE
+- **right:** fetch fMP4 → **mp4box** demux → **WebCodecs** → canvas (không `<video>` 2)
+- Bật right sau khi left `playing` — xem left có 3015 không (chung HW decoder?)
 
-Muốn 2 stream: **swap source trên 1 Shaka**. Mode thí nghiệm: `shaka-mp4` | `shaka-canvas` | `dual-mse` | …
+Mode khác: `shaka-telemetry` | `shaka-mp4` | `shaka-canvas` | `dual-mse` | …
 
 ## Streams
 
