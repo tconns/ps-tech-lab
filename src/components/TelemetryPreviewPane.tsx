@@ -17,12 +17,12 @@ type Snapshot = {
 }
 
 /**
- * Right pane that never opens a 2nd decoder: poster + live telemetry from the
- * Shaka `<video>`. PS5 evidence: any 2nd `<video>` (MSE or MP4) triggers left 3015.
+ * Non-decoding side pane. PS5 cannot run a 2nd video decode alongside Shaka
+ * (see docs/PS5-DUAL-PLAYER-FINDINGS.md).
  */
 export function TelemetryPreviewPane({
   source,
-  label = 'preview',
+  label = 'side',
   posterUrl,
 }: TelemetryPreviewPaneProps) {
   const [snap, setSnap] = useState<Snapshot | null>(null)
@@ -30,11 +30,10 @@ export function TelemetryPreviewPane({
   useEffect(() => {
     if (!source) {
       setSnap(null)
-      labTrace(label, 'waiting for shaka video (telemetry only — no 2nd decoder)')
       return
     }
 
-    labTrace(label, 'telemetry preview armed (PS5-safe: no 2nd video decode)')
+    labTrace(label, 'telemetry pane armed (no 2nd decoder)')
 
     const read = () => {
       setSnap({
@@ -73,7 +72,7 @@ export function TelemetryPreviewPane({
       <div className="pane__hud pane__hud--telemetry" aria-live="polite">
         <strong>{label}</strong>
         <span className="pane__engine">no 2nd decoder</span>
-        <span>PS5: 1 HW video decoder — 2nd video kills Shaka (3015)</span>
+        <span>PS5: dual live video not supported</span>
         {snap ? (
           <>
             <span>
@@ -81,7 +80,7 @@ export function TelemetryPreviewPane({
               {Number.isFinite(snap.duration) ? `${snap.duration.toFixed(1)}s` : '—'}
             </span>
             <span>
-              {snap.videoWidth}×{snap.videoHeight} readyState={snap.readyState}{' '}
+              {snap.videoWidth}×{snap.videoHeight}{' '}
               {snap.paused ? 'paused' : 'playing'}
             </span>
           </>

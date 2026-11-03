@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#5b3cc4"/>
+  <circle cx="64" cy="90" r="36" fill="#f5c542"/>
+  <text x="116" y="102" fill="#ffffff" font-size="32" font-family="sans-serif">cache</text>
+</svg>
