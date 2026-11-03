@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import shaka from 'shaka-player'
 import { labTrace } from '../lab/labTrace'
+import { formatShakaError, shakaErrorPayload } from '../player/shakaError'
 import { installShakaPolyfills } from '../player/installShakaPolyfills'
 import { registerStripAudioNetworkFilter } from '../player/registerStripAudioNetworkFilter'
 import { PLAYER_MAX_HEIGHT } from '../streams'
@@ -15,15 +16,6 @@ type PlayerPaneProps = {
 }
 
 type Status = 'idle' | 'boot' | 'loading' | 'playing' | 'error'
-
-function formatShakaError(err: unknown): string {
-  if (err && typeof err === 'object' && 'code' in err) {
-    const e = err as { code?: number; message?: string; data?: unknown[] }
-    return `shaka ${e.code ?? '?'} ${e.message ?? ''} ${JSON.stringify(e.data ?? [])}`
-  }
-  if (err instanceof Error) return err.message
-  return String(err)
-}
 
 export function PlayerPane({
   src,
@@ -63,11 +55,18 @@ export function PlayerPane({
     let cancelled = false
     setStatus('loading')
     setError(null)
-    labTrace(label, 'create player + strip-audio filter')
+    labTrace(label, 'create player + strip-audio filter (MSE)')
 
     const onShakaError = (event: Event) => {
       const detail = (event as CustomEvent).detail
-      labTrace(label, 'shaka error event', detail)
+      const payload = shakaErrorPayload(detail)
+      labTrace(label, `shaka error event ${formatShakaError(detail)}`, payload)
+      if (detail?.code === 3015) {
+        labTrace(
+          label,
+          '3015 MEDIA_SOURCE_OPERATION_THREW — PS5 often cannot sustain this MSE op (esp. with a 2nd decoder/MSE)',
+        )
+      }
     }
     player.addEventListener('error', onShakaError)
 
@@ -77,14 +76,13 @@ export function PlayerPane({
           abr: { enabled: true },
           restrictions: { maxHeight: PLAYER_MAX_HEIGHT },
           streaming: {
-            bufferingGoal: 10,
-            rebufferingGoal: 2,
-            bufferBehind: 5,
+            bufferingGoal: 6,
+            rebufferingGoal: 1,
+            bufferBehind: 3,
           },
         })
         labTrace(label, `configure maxHeight=${PLAYER_MAX_HEIGHT}`)
 
-        // Defer MSE init until load() — same pattern as react-playstation ShakaEngine.
         labTrace(label, 'attach(video, initializeMediaSource=false)')
         await player.attach(video, /* initializeMediaSource */ false)
         if (cancelled) return
@@ -110,13 +108,13 @@ export function PlayerPane({
         await video.play()
         if (cancelled) return
 
-        labTrace(label, 'playing')
+        labTrace(label, 'playing (shaka/mse)')
         setStatus('playing')
         onPlaying?.()
       } catch (err) {
         if (cancelled) return
         const msg = formatShakaError(err)
-        labTrace(label, `load failed: ${msg}`, err)
+        labTrace(label, `load failed: ${msg}`, shakaErrorPayload(err))
         setStatus('error')
         setError(msg)
         onError?.(msg)
@@ -139,6 +137,7 @@ export function PlayerPane({
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>
+        <span className="pane__engine">shaka/mse</span>
         {error ? <span className="pane__err">{error}</span> : null}
       </div>
     </div>

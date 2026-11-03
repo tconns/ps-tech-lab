@@ -28,6 +28,16 @@ Boot theo `react-playstation`:
 - `resolveForcedDevicePlatform()` — UA PS5 spoof không có msdk → Web adapter
 - `bootstrap()` từ `@osiris-smarttv/device` — preload MSDK rồi mới mount dual player
 
+## Dual player trên PS5
+
+Hai session **Shaka MSE** trên PS5 thường lên `playing` rồi cả hai ném **3015 `MEDIA_SOURCE_OPERATION_THREW`**.
+
+Mặc định `DUAL_MODE = 'hybrid'` trong `src/streams.ts`:
+- **left:** Shaka MSE + DASH (strip audio)
+- **right:** native WebKit HLS `<video>` (không MSE thứ 2), start sau khi left `playing`
+
+Đổi mode: `hybrid` | `dual-mse` | `dual-native`.
+
 ## Streams
 
-Hardcode trong `src/streams.ts` (Google / Shaka demo DASH).
+Hardcode trong `src/streams.ts`.

@@ -25,3 +25,29 @@ export function stripAudioFromManifestText(text: string): string {
   }
   return text
 }
+
+/** Rewrite relative HLS URIs so a blob: master playlist still resolves on CDN. */
+export function absolutizeHlsPlaylist(text: string, baseUrl: string): string {
+  const base = new URL(baseUrl)
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return line
+      if (trimmed.startsWith('#')) {
+        return line.replace(/URI="([^"]+)"/g, (_m, uri: string) => {
+          try {
+            return `URI="${new URL(uri, base).href}"`
+          } catch {
+            return `URI="${uri}"`
+          }
+        })
+      }
+      try {
+        return new URL(trimmed, base).href
+      } catch {
+        return line
+      }
+    })
+    .join('\n')
+}
