@@ -12,7 +12,11 @@ export function probeLabCapabilities(): LabCapabilities {
     typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === 'function'
   const captureStream =
     typeof HTMLVideoElement !== 'undefined' &&
-    typeof HTMLVideoElement.prototype.captureStream === 'function'
+    typeof (
+      HTMLVideoElement.prototype as HTMLVideoElement & {
+        captureStream?: () => MediaStream
+      }
+    ).captureStream === 'function'
 
   const caps = { webAssembly, videoDecoder, captureStream }
   labTrace('caps', 'PS5/lab capability probe', caps)
