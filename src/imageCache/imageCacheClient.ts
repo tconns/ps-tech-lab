@@ -10,10 +10,16 @@ export type CachedImage = {
   bytes: number
 }
 
+export type DownloadedImage = {
+  bytes: number
+  contentType: string
+  body: ArrayBuffer
+}
+
 let worker: Worker | null = null
 let nextId = 1
 const pending = new Map<number, {
-  resolve: (bytes: number) => void
+  resolve: (image: DownloadedImage) => void
   reject: (error: Error) => void
 }>()
 
@@ -26,8 +32,15 @@ function getWorker(): Worker {
     const slot = pending.get(message.id)
     if (!slot) return
     pending.delete(message.id)
-    if (message.ok) slot.resolve(message.bytes)
-    else slot.reject(new Error(message.error))
+    if (message.ok) {
+      slot.resolve({
+        bytes: message.bytes,
+        contentType: message.contentType,
+        body: message.body,
+      })
+    } else {
+      slot.reject(new Error(message.error))
+    }
   }
   worker.onerror = (event) => {
     const error = new Error(event.message || 'image cache worker failed')
@@ -37,8 +50,7 @@ function getWorker(): Worker {
   return worker
 }
 
-/** Ask the worker to fetch `url` and store it. Resolves with the byte size after `cache.put` succeeds. */
-export function cacheImage(url: string): Promise<number> {
+function downloadImage(url: string): Promise<DownloadedImage> {
   const id = nextId++
   const request: CacheImageRequest = { id, url }
   return new Promise((resolve, reject) => {
@@ -55,16 +67,33 @@ export function closeImageCacheWorker(): void {
   pending.clear()
 }
 
+/** Store a downloaded body in the page CacheStorage, including the size header. */
+export async function storeDownloadedImage(url: string, image: DownloadedImage): Promise<void> {
+  const stored = new Response(image.body, {
+    status: 200,
+    headers: {
+      'Content-Type': image.contentType,
+      [IMAGE_BYTES_HEADER]: String(image.body.byteLength),
+    },
+  })
+  const cache = await caches.open(IMAGE_CACHE_NAME)
+  await cache.put(url, stored)
+}
+
+export async function downloadAndStoreImage(url: string): Promise<number> {
+  const image = await downloadImage(url)
+  await storeDownloadedImage(url, image)
+  return image.body.byteLength
+}
+
 /**
  * Page-side read: match the URL, require the size header, then build a blob URL.
- * Does not hit the network.
+ * Returns null when the URL is not in CacheStorage. Does not hit the network.
  */
-export async function readCachedImage(url: string): Promise<CachedImage> {
+export async function readCachedImage(url: string): Promise<CachedImage | null> {
   const cache = await caches.open(IMAGE_CACHE_NAME)
   const hit = await cache.match(url)
-  if (!hit) {
-    throw new Error('cache miss')
-  }
+  if (!hit) return null
 
   const header = hit.headers.get(IMAGE_BYTES_HEADER)
   const bytes = header == null ? Number.NaN : Number(header)
