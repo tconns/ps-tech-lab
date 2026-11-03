@@ -30,13 +30,16 @@ Boot theo `react-playstation`:
 
 ## Dual pane trên PS5
 
-PS5 WebKit gần như chỉ chịu **1 video decoder / MSE**. Dual Shaka → 3015; thử native thứ 2 cũng hay kéo sập player chính.
+Kết luận lab trên PS5 FW 13:
+- Dual **Shaka MSE** → 3015 `MEDIA_SOURCE_OPERATION_THREW`
+- **`captureStream` thiếu**; **canvas `drawImage` từ MSE → frame đen**
+- HLS blob native → `NotSupportedError`
 
-Mặc định `DUAL_MODE = 'shaka-canvas'`:
-- **left:** Shaka MSE (DASH, strip audio) — decoder thật
-- **right:** `<canvas>` `drawImage` từ cùng `<video>` — chỉ preview/mirror, không decode stream thứ 2
+Mặc định `DUAL_MODE = 'shaka-mp4'`:
+- **left:** Shaka MSE + DASH (strip audio)
+- **right:** progressive **MP4** native (không MSE) — lên hình thật nếu HW cho phép; theo dõi left có 3015 sau khi right start
 
-Muốn 2 stream khác nhau: phải **đổi source trên 1 Shaka** (swap), không decode song song. Mode thí nghiệm còn lại: `hybrid` | `dual-mse` | `dual-native`.
+`shaka-canvas` giữ để tái hiện MSE→canvas black. Mode khác: `dual-mse` | `hybrid` | `dual-native`.
 
 ## Streams
 

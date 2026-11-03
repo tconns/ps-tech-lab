@@ -16,8 +16,8 @@ import {
 /**
  * Dual-pane lab for PS5.
  *
- * Default `shaka-canvas`: one Shaka MSE decoder on the left; right pane paints
- * the same `<video>` onto canvas (preview only — no second decoder).
+ * Default `shaka-mp4`: left Shaka MSE; right progressive MP4 native (no 2nd MSE).
+ * Canvas mirror of MSE is documented black on this PS5 (`shaka-canvas`).
  */
 export function DualPlayerPage() {
   const [rightActive, setRightActive] = useState(DUAL_MODE === 'shaka-canvas')
@@ -41,11 +41,11 @@ export function DualPlayerPage() {
 
   const onLeftPlaying = useCallback(() => {
     if (DUAL_MODE === 'shaka-canvas') {
-      labTrace('gate', 'shaka playing — arm captureStream/canvas preview on same decoder')
+      labTrace('gate', 'shaka playing — canvas path (expect black frames on PS5)')
       return
     }
     if (!ENABLED_PANES.right) {
-      labTrace('gate', 'right pane disabled — skip second player')
+      labTrace('gate', 'right pane disabled')
       return
     }
     labTrace('gate', `left playing — arm right (${DUAL_MODE}) in ${SECOND_PLAYER_DELAY_MS}ms`)
@@ -56,7 +56,7 @@ export function DualPlayerPage() {
   }, [])
 
   const onRightPlaying = useCallback(() => {
-    labTrace('gate', `both players reported playing (mode=${DUAL_MODE})`)
+    labTrace('gate', `both panes reported playing (mode=${DUAL_MODE}) — watch left for 3015`)
   }, [])
 
   const onLeftError = useCallback((message: string) => {
@@ -70,7 +70,8 @@ export function DualPlayerPage() {
   const left =
     DUAL_MODE === 'dual-native' ? (
       <NativePlayerPane
-        src={STREAMS.leftHls}
+        src={STREAMS.leftMp4}
+        kind="mp4"
         label="left"
         active
         onPlaying={onLeftPlaying}
@@ -100,10 +101,22 @@ export function DualPlayerPage() {
         onError={onRightError}
       />
     )
+  } else if (DUAL_MODE === 'shaka-mp4' || DUAL_MODE === 'hybrid') {
+    right = (
+      <NativePlayerPane
+        src={DUAL_MODE === 'shaka-mp4' ? STREAMS.rightMp4 : STREAMS.rightHls}
+        kind={DUAL_MODE === 'shaka-mp4' ? 'mp4' : 'hls'}
+        label="right"
+        active={rightActive}
+        onPlaying={onRightPlaying}
+        onError={onRightError}
+      />
+    )
   } else {
     right = (
       <NativePlayerPane
-        src={STREAMS.rightHls}
+        src={STREAMS.rightMp4}
+        kind="mp4"
         label="right"
         active={rightActive}
         onPlaying={onRightPlaying}

@@ -108,7 +108,11 @@ export function CanvasPreviewPane({ source, label = 'canvas' }: CanvasPreviewPan
               labTrace(label, `canvas pixel probe #${blackChecks}`, { black })
               if (black) {
                 setStatus('black')
-                setError('canvas frames are black (PS5 often cannot sample MSE video)')
+                setError(
+                  'MSE→canvas black on PS5 (no captureStream). Use DUAL_MODE=shaka-mp4 for a real 2nd picture.',
+                )
+                running = false
+                return
               }
             }
           }

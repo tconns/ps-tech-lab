@@ -7,6 +7,8 @@ import {
 
 type NativePlayerPaneProps = {
   src: string
+  /** Progressive MP4 is preferred on PS5; HLS blob masters are often NotSupported. */
+  kind?: 'mp4' | 'hls'
   label?: string
   active?: boolean
   onPlaying?: () => void
@@ -17,10 +19,10 @@ type Status = 'idle' | 'boot' | 'loading' | 'playing' | 'error'
 
 /**
  * Native WebKit `<video>` — no Shaka / no second MediaSource.
- * Used as the right pane on PS5 so we only keep one MSE session.
  */
 export function NativePlayerPane({
   src,
+  kind = 'mp4',
   label = 'native',
   active = true,
   onPlaying,
@@ -57,7 +59,10 @@ export function NativePlayerPane({
 
     const onPlayingEvt = () => {
       if (cancelled) return
-      labTrace(label, 'playing (native)')
+      labTrace(label, `playing (native ${kind})`, {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+      })
       setStatus('playing')
       onPlaying?.()
     }
@@ -67,6 +72,17 @@ export function NativePlayerPane({
 
     const start = async () => {
       try {
+        video.muted = true
+        video.loop = true
+        video.playsInline = true
+
+        if (kind === 'mp4') {
+          labTrace(label, 'set video.src progressive mp4', src)
+          video.src = src
+          await video.play()
+          return
+        }
+
         labTrace(label, 'fetch HLS master for audio strip', src)
         const text = await fetch(src).then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -78,9 +94,7 @@ export function NativePlayerPane({
         objectUrl = URL.createObjectURL(
           new Blob([stripped], { type: 'application/vnd.apple.mpegurl' }),
         )
-        labTrace(label, 'set video.src blob (audio stripped + absolute URIs)')
-        video.muted = true
-        video.loop = true
+        labTrace(label, 'set video.src blob HLS')
         video.src = objectUrl
         await video.play()
       } catch (err) {
@@ -101,18 +115,19 @@ export function NativePlayerPane({
       video.removeEventListener('error', onVideoError)
       video.removeEventListener('playing', onPlayingEvt)
       video.removeAttribute('src')
+      video.srcObject = null
       video.load()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [src, label, active, onPlaying, onError])
+  }, [src, kind, label, active, onPlaying, onError])
 
   return (
     <div className="pane">
-      <video ref={videoRef} playsInline muted autoPlay />
+      <video ref={videoRef} playsInline muted autoPlay preload="metadata" />
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>
-        <span className="pane__engine">native</span>
+        <span className="pane__engine">native/{kind}</span>
         {error ? <span className="pane__err">{error}</span> : null}
       </div>
     </div>
