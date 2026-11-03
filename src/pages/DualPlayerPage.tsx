@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PlatformDetector } from '@osiris-smarttv/device'
+import { CanvasPreviewPane } from '../components/CanvasPreviewPane'
 import { NativePlayerPane } from '../components/NativePlayerPane'
 import { PlayerPane } from '../components/PlayerPane'
 import { isPs5Runtime } from '../device'
@@ -13,14 +14,14 @@ import {
 } from '../streams'
 
 /**
- * Dual playback lab.
+ * Dual-pane lab for PS5.
  *
- * PS5 logs showed dual Shaka MSE: both reach `playing`, then repeating
- * 3015 MEDIA_SOURCE_OPERATION_THREW. Default `hybrid` keeps one MSE (Shaka)
- * and uses native WebKit HLS for the second pane.
+ * Default `shaka-canvas`: one Shaka MSE decoder on the left; right pane paints
+ * the same `<video>` onto canvas (preview only — no second decoder).
  */
 export function DualPlayerPage() {
-  const [rightActive, setRightActive] = useState(false)
+  const [rightActive, setRightActive] = useState(DUAL_MODE === 'shaka-canvas')
+  const [shakaVideo, setShakaVideo] = useState<HTMLVideoElement | null>(null)
 
   useEffect(() => {
     const detected = PlatformDetector.detect()
@@ -33,7 +34,16 @@ export function DualPlayerPage() {
     })
   }, [])
 
+  const onVideoElement = useCallback((video: HTMLVideoElement | null) => {
+    setShakaVideo(video)
+    labTrace('page', video ? 'shaka video element ready for canvas' : 'shaka video element cleared')
+  }, [])
+
   const onLeftPlaying = useCallback(() => {
+    if (DUAL_MODE === 'shaka-canvas') {
+      labTrace('gate', 'shaka playing — canvas preview already sampling same video')
+      return
+    }
     if (!ENABLED_PANES.right) {
       labTrace('gate', 'right pane disabled — skip second player')
       return
@@ -73,11 +83,15 @@ export function DualPlayerPage() {
         active
         onPlaying={onLeftPlaying}
         onError={onLeftError}
+        onVideoElement={DUAL_MODE === 'shaka-canvas' ? onVideoElement : undefined}
       />
     )
 
-  const right =
-    DUAL_MODE === 'dual-mse' ? (
+  let right: React.ReactNode
+  if (DUAL_MODE === 'shaka-canvas') {
+    right = <CanvasPreviewPane source={shakaVideo} label="right" />
+  } else if (DUAL_MODE === 'dual-mse') {
+    right = (
       <PlayerPane
         src={STREAMS.rightDash}
         label="right"
@@ -85,7 +99,9 @@ export function DualPlayerPage() {
         onPlaying={onRightPlaying}
         onError={onRightError}
       />
-    ) : (
+    )
+  } else {
+    right = (
       <NativePlayerPane
         src={STREAMS.rightHls}
         label="right"
@@ -94,6 +110,7 @@ export function DualPlayerPage() {
         onError={onRightError}
       />
     )
+  }
 
   return (
     <>

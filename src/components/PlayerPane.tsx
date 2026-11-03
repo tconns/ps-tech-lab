@@ -13,6 +13,8 @@ type PlayerPaneProps = {
   active?: boolean
   onPlaying?: () => void
   onError?: (message: string) => void
+  /** Expose the underlying video for canvas preview (same decoder). */
+  onVideoElement?: (video: HTMLVideoElement | null) => void
 }
 
 type Status = 'idle' | 'boot' | 'loading' | 'playing' | 'error'
@@ -23,10 +25,16 @@ export function PlayerPane({
   active = true,
   onPlaying,
   onError,
+  onVideoElement,
 }: PlayerPaneProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [status, setStatus] = useState<Status>(active ? 'boot' : 'idle')
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    onVideoElement?.(videoRef.current)
+    return () => onVideoElement?.(null)
+  }, [onVideoElement])
 
   useEffect(() => {
     if (!active) {

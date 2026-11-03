@@ -7,23 +7,26 @@ export const STREAMS = {
 } as const
 
 /**
- * PS5 evidence (lab logs): dual Shaka MSE reaches `playing` then both throw
- * Shaka 3015 MEDIA_SOURCE_OPERATION_THREW — WebKit will not sustain 2 MSE/decoders.
+ * PS5 lab findings:
+ * - dual Shaka MSE → 3015 MEDIA_SOURCE_OPERATION_THREW after both "playing"
+ * - native HLS blob / 2nd decoder attempt can also kill the first MSE session
  *
- * - `hybrid` (default): left = Shaka MSE (DASH, strip audio), right = native HLS `<video>` (no 2nd MSE)
- * - `dual-mse`: both Shaka (repro 3015)
- * - `dual-native`: both native HLS
+ * Workable dual *pane*: one Shaka decoder + canvas `drawImage` preview (same frames).
+ * True simultaneous dual *stream* decode is not available on this PS5 WebKit path.
+ *
+ * - `shaka-canvas` (default): left Shaka, right canvas mirror/preview
+ * - `dual-mse` / `hybrid` / `dual-native`: kept for repro experiments
  */
-export type DualMode = 'hybrid' | 'dual-mse' | 'dual-native'
+export type DualMode = 'shaka-canvas' | 'hybrid' | 'dual-mse' | 'dual-native'
 
-export const DUAL_MODE: DualMode = 'hybrid'
+export const DUAL_MODE: DualMode = 'shaka-canvas'
 
 export const ENABLED_PANES = {
   left: true,
   right: true,
 } as const
 
-/** Delay before starting the second pane (after first `playing`). */
+/** Delay before starting a second MSE/native pane (ignored for shaka-canvas). */
 export const SECOND_PLAYER_DELAY_MS = 2500
 
 /** Cap Shaka ABR height so the MSE session stays light. */
