@@ -3,6 +3,7 @@ import { PlatformDetector } from '@osiris-smarttv/device'
 import { CanvasPreviewPane } from '../components/CanvasPreviewPane'
 import { NativePlayerPane } from '../components/NativePlayerPane'
 import { PlayerPane } from '../components/PlayerPane'
+import { TelemetryPreviewPane } from '../components/TelemetryPreviewPane'
 import { isPs5Runtime } from '../device'
 import { LabTraceOverlay } from '../lab/LabTraceOverlay'
 import { labTrace } from '../lab/labTrace'
@@ -16,11 +17,12 @@ import {
 /**
  * Dual-pane lab for PS5.
  *
- * Default `shaka-mp4`: left Shaka MSE; right progressive MP4 native (no 2nd MSE).
- * Canvas mirror of MSE is documented black on this PS5 (`shaka-canvas`).
+ * Default `shaka-telemetry`: one Shaka decoder + poster/telemetry right pane.
+ * Device logs proved a 2nd `<video>` (MSE or MP4) kills the first with 3015.
  */
 export function DualPlayerPage() {
-  const [rightActive, setRightActive] = useState(DUAL_MODE === 'shaka-canvas')
+  const needsSecondVideo = DUAL_MODE !== 'shaka-telemetry' && DUAL_MODE !== 'shaka-canvas'
+  const [rightActive, setRightActive] = useState(!needsSecondVideo)
   const [shakaVideo, setShakaVideo] = useState<HTMLVideoElement | null>(null)
 
   useEffect(() => {
@@ -31,32 +33,31 @@ export function DualPlayerPage() {
       mode: DUAL_MODE,
       enabled: ENABLED_PANES,
       secondDelayMs: SECOND_PLAYER_DELAY_MS,
+      conclusion:
+        'PS5 single HW decoder — 2nd video causes left 3015; canvas/captureStream unusable for MSE mirror',
     })
   }, [])
 
   const onVideoElement = useCallback((video: HTMLVideoElement | null) => {
     setShakaVideo(video)
-    labTrace('page', video ? 'shaka video element ready for canvas' : 'shaka video element cleared')
+    labTrace('page', video ? 'shaka video element ready' : 'shaka video element cleared')
   }, [])
 
   const onLeftPlaying = useCallback(() => {
-    if (DUAL_MODE === 'shaka-canvas') {
-      labTrace('gate', 'shaka playing — canvas path (expect black frames on PS5)')
+    if (!needsSecondVideo) {
+      labTrace('gate', `shaka playing — right pane is ${DUAL_MODE} (no 2nd decoder)`)
       return
     }
-    if (!ENABLED_PANES.right) {
-      labTrace('gate', 'right pane disabled')
-      return
-    }
+    if (!ENABLED_PANES.right) return
     labTrace('gate', `left playing — arm right (${DUAL_MODE}) in ${SECOND_PLAYER_DELAY_MS}ms`)
     window.setTimeout(() => {
       labTrace('gate', 'activate right player')
       setRightActive(true)
     }, SECOND_PLAYER_DELAY_MS)
-  }, [])
+  }, [needsSecondVideo])
 
   const onRightPlaying = useCallback(() => {
-    labTrace('gate', `both panes reported playing (mode=${DUAL_MODE}) — watch left for 3015`)
+    labTrace('gate', `both panes reported playing (mode=${DUAL_MODE})`)
   }, [])
 
   const onLeftError = useCallback((message: string) => {
@@ -66,6 +67,9 @@ export function DualPlayerPage() {
   const onRightError = useCallback((message: string) => {
     labTrace('gate', 'right error', message)
   }, [])
+
+  const shareVideo =
+    DUAL_MODE === 'shaka-telemetry' || DUAL_MODE === 'shaka-canvas'
 
   const left =
     DUAL_MODE === 'dual-native' ? (
@@ -84,12 +88,20 @@ export function DualPlayerPage() {
         active
         onPlaying={onLeftPlaying}
         onError={onLeftError}
-        onVideoElement={DUAL_MODE === 'shaka-canvas' ? onVideoElement : undefined}
+        onVideoElement={shareVideo ? onVideoElement : undefined}
       />
     )
 
   let right: React.ReactNode
-  if (DUAL_MODE === 'shaka-canvas') {
+  if (DUAL_MODE === 'shaka-telemetry') {
+    right = (
+      <TelemetryPreviewPane
+        source={shakaVideo}
+        label="right"
+        posterUrl={STREAMS.rightPoster}
+      />
+    )
+  } else if (DUAL_MODE === 'shaka-canvas') {
     right = <CanvasPreviewPane source={shakaVideo} label="right" />
   } else if (DUAL_MODE === 'dual-mse') {
     right = (

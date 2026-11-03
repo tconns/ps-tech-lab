@@ -30,16 +30,17 @@ Boot theo `react-playstation`:
 
 ## Dual pane trên PS5
 
-Kết luận lab trên PS5 FW 13:
-- Dual **Shaka MSE** → 3015 `MEDIA_SOURCE_OPERATION_THREW`
-- **`captureStream` thiếu**; **canvas `drawImage` từ MSE → frame đen**
-- HLS blob native → `NotSupportedError`
+Kết luận lab (PS5 FW 13, đã reproduce):
+- Dual Shaka MSE → 3015
+- `captureStream` thiếu; canvas từ MSE → **frame đen**
+- Bật **MP4 native thứ 2** khi Shaka đang play → left 3015 ngay (`Media failed to decode`)
+- ⇒ **1 HW video decoder** — không decode 2 video song song
 
-Mặc định `DUAL_MODE = 'shaka-mp4'`:
-- **left:** Shaka MSE + DASH (strip audio)
-- **right:** progressive **MP4** native (không MSE) — lên hình thật nếu HW cho phép; theo dõi left có 3015 sau khi right start
+Mặc định `DUAL_MODE = 'shaka-telemetry'`:
+- **left:** Shaka MSE (decode thật)
+- **right:** poster + telemetry từ cùng `<video>` (không decoder 2)
 
-`shaka-canvas` giữ để tái hiện MSE→canvas black. Mode khác: `dual-mse` | `hybrid` | `dual-native`.
+Muốn 2 stream: **swap source trên 1 Shaka**. Mode thí nghiệm: `shaka-mp4` | `shaka-canvas` | `dual-mse` | …
 
 ## Streams
 
