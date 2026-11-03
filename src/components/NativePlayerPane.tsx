@@ -74,11 +74,11 @@ export function NativePlayerPane({
         })
         if (cancelled) return
 
-        const stripped = stripAudioFromManifestText(text)
+        const stripped = absolutizeHlsPlaylist(stripAudioFromManifestText(text), src)
         objectUrl = URL.createObjectURL(
           new Blob([stripped], { type: 'application/vnd.apple.mpegurl' }),
         )
-        labTrace(label, 'set video.src blob (audio groups stripped)')
+        labTrace(label, 'set video.src blob (audio stripped + absolute URIs)')
         video.muted = true
         video.loop = true
         video.src = objectUrl
