@@ -1,12 +1,12 @@
 # Hướng dẫn deploy PS Tech Lab lên Dokploy
 
-App là SPA React (Vite) đóng gói Docker Compose: service `web` build từ `Dockerfile`, nginx lắng nghe cổng **80**.
+App là SPA React (Vite) đóng gói Docker Compose: service `web` build từ `Dockerfile`, nginx lắng nghe cổng **80** trong mạng compose (không bind host port 80).
 
 ## Điều kiện
 
 - Repo đã push lên Git (GitHub / GitLab / tương đương)
 - Dokploy đã kết nối được repo đó
-- Domain (tuỳ chọn) đã trỏ về server Dokploy
+- Domain đã trỏ về server Dokploy (Traefik)
 
 ## 1. Tạo service Docker Compose trên Dokploy
 
@@ -28,10 +28,10 @@ Dokploy sẽ `docker compose build` + `up` theo file trong repo.
 
 1. Vào tab **Domains** của service
 2. Thêm domain (ví dụ `techlab.yourdomain.com`)
-3. Trỏ domain tới service / port **80** (Dokploy + Traefik thường tự gắn)
+3. Trỏ domain tới service **`web`** / port **80**
 4. Bật HTTPS (Let's Encrypt) nếu có
 
-> Nếu deploy bằng Compose mà **không** gắn domain Traefik, compose đang map `80:80` trên host. Đổi port host trong `docker-compose.yml` nếu máy đã chiếm cổng 80.
+`docker-compose.yml` chỉ `expose: "80"` — **không** map `80:80` lên host, tránh lỗi `port is already allocated` (cổng 80 thường đã dùng bởi Traefik/Dokploy).
 
 Không cần biến môi trường cho v1 (stream hardcode trong `src/streams.ts`).
 
@@ -39,7 +39,7 @@ Không cần biến môi trường cho v1 (stream hardcode trong `src/streams.ts
 
 1. **Deploy** / **Rebuild**
 2. Đợi build: `npm ci` → `npm run build` → image nginx
-3. Mở domain hoặc `http://<server-ip>` (nếu map 80)
+3. Mở domain đã gắn
 
 Kỳ vọng: màn hình đen, **2 video** chia đôi (Big Buck Bunny | Sintel).
 
@@ -52,19 +52,10 @@ Kỳ vọng: màn hình đen, **2 video** chia đôi (Big Buck Bunny | Sintel).
 ## 5. Chạy local bằng Docker Compose
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
-Mở [http://localhost](http://localhost) (port **80**).
-
-Nếu cổng 80 bận, tạm sửa trong `docker-compose.yml`:
-
-```yaml
-ports:
-  - "8080:80"
-```
-
-Rồi mở [http://localhost:8080](http://localhost:8080).
+Mở [http://localhost:8080](http://localhost:8080).
 
 Không Docker:
 
@@ -77,25 +68,26 @@ npm run dev
 
 Sửa `src/streams.ts` → commit → push → Deploy lại trên Dokploy.
 
-## Cấu trúc Compose
+## Cấu trúc Compose (Dokploy)
 
 ```yaml
 services:
-  web:          # SPA + nginx
-    build: .    # Dockerfile multi-stage
-    ports:
-      - "80:80"
+  web:
+    build: .
+    expose:
+      - "80"   # nội bộ; Traefik/Dokploy route domain vào đây
 ```
 
-Chỉ một service — đủ cho lab static.
+Local thêm `docker-compose.local.yml` để map `8080:80`.
 
 ## Sự cố thường gặp
 
 | Triệu chứng | Cách xử lý |
 |-------------|------------|
+| `Bind for 0.0.0.0:80 failed: port is already allocated` | Không map host port 80; dùng `expose` + Domain Dokploy (đã sửa trên `develop`) |
 | Dokploy không thấy Compose | Chọn đúng loại **Docker Compose**, path `docker-compose.yml` |
 | Build fail `npm ci` | Commit đủ `package-lock.json` |
-| Port 80 already allocated | Đổi host port trong `ports`, hoặc chỉ dùng Domain/Traefik |
 | 404 khi refresh route | Kiểm tra `nginx.conf` có `try_files ... /index.html` |
+| Domain không vào được | Domain phải trỏ service `web` port `80`; kiểm tra Traefik/HTTPS |
 | Video không chạy | Kiểm tra mạng tới Google Storage; app đã `muted` cho autoplay |
 | Màn đen mãi | Debug trên desktop trước, rồi thử PS5 |

@@ -12,10 +12,10 @@ npm run dev
 ## Docker Compose
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
-Mở http://localhost (port 80). Chi tiết service trong `docker-compose.yml`.
+Mở http://localhost:8080. (Dokploy chỉ dùng `docker-compose.yml` với `expose: 80`, không bind host port.)
 
 ## Dokploy
 
