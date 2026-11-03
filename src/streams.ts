@@ -7,8 +7,7 @@ export const STREAMS = {
   rightMp4: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   leftMp4: 'https://www.w3schools.com/html/mov_bbb.mp4',
   /** Static poster for decoder-safe right pane (image, not video) */
-  rightPoster:
-    'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/640px-Big_buck_bunny_poster_big.jpg',
+  rightPoster: 'https://peach.blender.org/wp-content/uploads/poster_bunny_big.jpg',
 } as const
 
 /**
