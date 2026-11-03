@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import shaka from 'shaka-player'
 import { installShakaPolyfills } from '../player/installShakaPolyfills'
+import { registerStripAudioNetworkFilter } from '../player/registerStripAudioNetworkFilter'
 
 type PlayerPaneProps = {
   src: string
@@ -21,6 +22,7 @@ export function PlayerPane({ src }: PlayerPaneProps) {
     }
 
     const player = new shaka.Player()
+    registerStripAudioNetworkFilter(player)
     let cancelled = false
 
     const start = async () => {
