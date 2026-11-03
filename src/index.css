@@ -50,6 +50,7 @@ body,
 }
 
 .pane {
+  position: relative;
   flex: 1 1 50%;
   min-width: 0;
   min-height: 0;
@@ -59,11 +60,42 @@ body,
   justify-content: center;
 }
 
+.pane--off {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+}
+
 .pane video {
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #000;
+}
+
+.pane__hud {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.pane__hud--error {
+  border-color: #c44;
+}
+
+.pane__err {
+  color: #f88;
+  word-break: break-word;
 }
 
 @media (max-width: 768px), (orientation: portrait) {

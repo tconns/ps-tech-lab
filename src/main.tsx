@@ -1,4 +1,3 @@
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { bootstrap, DeviceManager, PlatformDetector } from '@osiris-smarttv/device'
 import { BootScreen } from './components/BootScreen'
@@ -15,12 +14,9 @@ if (!container) {
 const root = createRoot(container)
 
 function renderApp(): void {
+  // No StrictMode: it double-mounts effects and tears down Shaka mid-load (black screen).
   installShakaPolyfills()
-  root.render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  )
+  root.render(<App />)
 }
 
 function logPlatform(phase: string): void {
