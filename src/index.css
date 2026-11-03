@@ -67,6 +67,7 @@ body,
 }
 
 .pane video,
+.pane__preview,
 .pane__canvas {
   width: 100%;
   height: 100%;
@@ -74,8 +75,21 @@ body,
   background: #000;
 }
 
+.pane__preview,
 .pane__canvas {
   display: block;
+}
+
+.pane__canvas[hidden] {
+  display: none;
+}
+
+.pane__hud--black {
+  border-color: #c80;
+}
+
+.pane__hud--captureStream {
+  opacity: 0.55;
 }
 
 .pane__hud {

@@ -141,7 +141,14 @@ export function PlayerPane({
 
   return (
     <div className="pane">
-      <video ref={videoRef} playsInline muted autoPlay />
+      <video
+        ref={videoRef}
+        playsInline
+        muted
+        autoPlay
+        // Helps canvas/captureStream read frames when CDN sends CORS.
+        crossOrigin="anonymous"
+      />
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>

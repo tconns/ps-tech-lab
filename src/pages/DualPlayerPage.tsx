@@ -41,7 +41,7 @@ export function DualPlayerPage() {
 
   const onLeftPlaying = useCallback(() => {
     if (DUAL_MODE === 'shaka-canvas') {
-      labTrace('gate', 'shaka playing — canvas preview already sampling same video')
+      labTrace('gate', 'shaka playing — arm captureStream/canvas preview on same decoder')
       return
     }
     if (!ENABLED_PANES.right) {
