@@ -98,6 +98,46 @@ body,
   word-break: break-word;
 }
 
+.pane__hud--playing {
+  opacity: 0.55;
+}
+
+.pane__hud--idle {
+  opacity: 0.7;
+}
+
+.trace {
+  position: fixed;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 20;
+  width: min(42rem, calc(100% - 1rem));
+  max-height: 28vh;
+  overflow: auto;
+  padding: 0.4rem 0.55rem;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.65rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.trace__line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trace__t {
+  color: #8cf;
+  margin-right: 0.35rem;
+}
+
+.trace__s {
+  color: #fc8;
+  margin-right: 0.35rem;
+}
+
 @media (max-width: 768px), (orientation: portrait) {
   .dual {
     flex-direction: column;

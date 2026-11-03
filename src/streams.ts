@@ -4,8 +4,16 @@ export const STREAMS = {
   right: 'https://storage.googleapis.com/shaka-demo-assets/sintel/dash.mpd',
 } as const
 
-/** Lab debug: only one pane until dual-player is stable on PS5. */
 export const ENABLED_PANES = {
   left: true,
-  right: false,
+  right: true,
 } as const
+
+/**
+ * PS5 WebKit often fights two concurrent MSE/decoder sessions.
+ * Start the second pane only after the first is playing, plus this delay.
+ */
+export const SECOND_PLAYER_DELAY_MS = 2500
+
+/** Cap resolution so two video-only decoders are more likely to fit. */
+export const PLAYER_MAX_HEIGHT = 480
