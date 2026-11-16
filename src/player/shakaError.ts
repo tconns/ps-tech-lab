@@ -9,7 +9,13 @@ export function formatShakaError(err: unknown): string {
       data?: unknown[]
     }
     if (e.code != null) {
-      const name = e.code === 3015 ? 'MEDIA_SOURCE_OPERATION_THREW' : `code=${e.code}`
+      const known: Record<number, string> = {
+        3015: 'MEDIA_SOURCE_OPERATION_THREW',
+        4012: 'RESTRICTIONS_CANNOT_BE_MET',
+        4032: 'CONTENT_UNSUPPORTED_BY_BROWSER',
+        4036: 'NO_VARIANTS',
+      }
+      const name = known[e.code] ?? `code=${e.code}`
       return `shaka ${name} cat=${e.category} sev=${e.severity} data=${JSON.stringify(e.data ?? [])}`
     }
     if (err instanceof Error) return err.message
@@ -29,7 +35,14 @@ export function shakaErrorPayload(err: unknown): Record<string, unknown> {
   }
   return {
     code: e.code,
-    name: e.code === 3015 ? 'MEDIA_SOURCE_OPERATION_THREW' : undefined,
+    name:
+      e.code === 3015
+        ? 'MEDIA_SOURCE_OPERATION_THREW'
+        : e.code === 4032
+          ? 'CONTENT_UNSUPPORTED_BY_BROWSER'
+          : e.code === 4012
+            ? 'RESTRICTIONS_CANNOT_BE_MET'
+            : undefined,
     category: e.category,
     severity: e.severity,
     message: e.message,

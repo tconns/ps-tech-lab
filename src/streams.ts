@@ -7,5 +7,5 @@ export const STREAMS = {
   sidePoster: 'https://peach.blender.org/wp-content/uploads/poster_bunny_big.jpg',
 } as const
 
-/** Cap Shaka ABR height to keep the single MSE session light on PS5. */
-export const PLAYER_MAX_HEIGHT = 480
+/** Cap Shaka ABR height. Allow up to 1080p live. */
+export const PLAYER_MAX_HEIGHT = 1080
