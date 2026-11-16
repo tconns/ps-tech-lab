@@ -42,11 +42,16 @@ body,
   max-width: 36rem;
 }
 
-.dual {
+.dual,
+.live {
   display: flex;
   flex-direction: row;
   width: 100%;
   height: 100%;
+}
+
+.live {
+  flex-direction: column;
 }
 
 .pane {
@@ -58,6 +63,12 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.pane--solo {
+  flex: 1 1 100%;
+  width: 100%;
+  height: 100%;
 }
 
 .pane--off {

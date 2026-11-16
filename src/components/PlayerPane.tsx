@@ -3,7 +3,6 @@ import shaka from 'shaka-player'
 import { labTrace } from '../lab/labTrace'
 import { formatShakaError, shakaErrorPayload } from '../player/shakaError'
 import { installShakaPolyfills } from '../player/installShakaPolyfills'
-import { registerStripAudioNetworkFilter } from '../player/registerStripAudioNetworkFilter'
 import { PLAYER_MAX_HEIGHT } from '../streams'
 
 type PlayerPaneProps = {
@@ -11,6 +10,8 @@ type PlayerPaneProps = {
   label?: string
   /** When false, mount the pane shell but do not create Shaka / MSE yet. */
   active?: boolean
+  /** Keep audio tracks and unmute the element. */
+  withAudio?: boolean
   onPlaying?: () => void
   onError?: (message: string) => void
   /** Expose the underlying video for canvas preview (same decoder). */
@@ -23,6 +24,7 @@ export function PlayerPane({
   src,
   label = 'player',
   active = true,
+  withAudio = false,
   onPlaying,
   onError,
   onVideoElement,
@@ -59,11 +61,10 @@ export function PlayerPane({
     }
 
     const player = new shaka.Player()
-    registerStripAudioNetworkFilter(player)
     let cancelled = false
     setStatus('loading')
     setError(null)
-    labTrace(label, 'create player + strip-audio filter (MSE)')
+    labTrace(label, withAudio ? 'create player (MSE, audio on)' : 'create player (MSE)')
 
     const onShakaError = (event: Event) => {
       const detail = (event as CustomEvent).detail
@@ -72,7 +73,7 @@ export function PlayerPane({
       if (detail?.code === 3015) {
         labTrace(
           label,
-          '3015 MEDIA_SOURCE_OPERATION_THREW — PS5 often cannot sustain this MSE op (esp. with a 2nd decoder/MSE)',
+          '3015 MEDIA_SOURCE_OPERATION_THREW — PS5 often cannot sustain this MSE op',
         )
       }
     }
@@ -100,7 +101,8 @@ export function PlayerPane({
         if (cancelled) return
 
         const variants = player.getVariantTracks()
-        labTrace(label, `loaded variants=${variants.length}`, {
+        const audioTracks = player.getAudioTracks?.() ?? []
+        labTrace(label, `loaded variants=${variants.length} audio=${audioTracks.length}`, {
           variants: variants.map((v) => ({
             id: v.id,
             h: v.height,
@@ -110,9 +112,9 @@ export function PlayerPane({
           })),
         })
 
-        video.muted = true
-        video.loop = true
-        labTrace(label, 'play()')
+        video.muted = !withAudio
+        video.loop = !src.includes('.m3u8')
+        labTrace(label, withAudio ? 'play() with audio' : 'play() muted')
         await video.play()
         if (cancelled) return
 
@@ -137,22 +139,21 @@ export function PlayerPane({
       player.removeEventListener('error', onShakaError)
       void player.destroy()
     }
-  }, [src, label, active, onPlaying, onError])
+  }, [src, label, active, withAudio, onPlaying, onError])
 
   return (
-    <div className="pane">
+    <div className="pane pane--solo">
       <video
         ref={videoRef}
         playsInline
-        muted
+        muted={!withAudio}
         autoPlay
-        // Helps canvas/captureStream read frames when CDN sends CORS.
         crossOrigin="anonymous"
       />
       <div className={`pane__hud pane__hud--${status}`} aria-live="polite">
         <strong>{label}</strong>
         <span>{status}</span>
-        <span className="pane__engine">shaka/mse</span>
+        <span className="pane__engine">shaka/mse{withAudio ? ' · a/v' : ''}</span>
         {error ? <span className="pane__err">{error}</span> : null}
       </div>
     </div>
