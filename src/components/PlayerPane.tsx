@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import shaka from 'shaka-player'
 import { labTrace } from '../lab/labTrace'
+import {
+  buildLivePlayerConfig,
+  LIVE_TARGET_LATENCY_SEC,
+} from '../player/buildLivePlayerConfig'
 import { formatShakaError, shakaErrorPayload } from '../player/shakaError'
 import { installShakaPolyfills } from '../player/installShakaPolyfills'
 import { PLAYER_MAX_HEIGHT } from '../streams'
@@ -106,35 +110,32 @@ export function PlayerPane({
 
     const start = async () => {
       try {
-        player.configure({
-          abr: { enabled: true },
-          restrictions: { maxHeight: PLAYER_MAX_HEIGHT },
-          manifest: {
-            disableText: true,
-            hls: {
-              ignoreTextStreamFailures: true,
-              ignoreManifestProgramDateTime: false,
-            },
-          },
-          streaming: {
-            bufferingGoal: hls ? 12 : 6,
-            rebufferingGoal: hls ? 2 : 1,
-            bufferBehind: hls ? 6 : 3,
-            // PS5 WebKit: native HLS is more reliable than MSE for m3u8.
-            preferNativeHls: hls,
-            fallbackToNativeHlsOnMseError: hls,
+        if (hls) {
+          // Parity with fast-media-player live-channel PS5 policy.
+          player.configure(buildLivePlayerConfig({ maxHeight: PLAYER_MAX_HEIGHT }))
+          labTrace(label, 'configure live HLS (FMP PS5 policy)', {
+            mime: HLS_MIME,
+            maxHeight: PLAYER_MAX_HEIGHT,
+            targetLatencySec: LIVE_TARGET_LATENCY_SEC,
+            bufferingGoal: 30,
             lowLatencyMode: false,
-            ignoreTextStreamFailures: true,
-          },
-        })
-        labTrace(label, hls ? 'configure HLS native + mime m3u8' : `configure maxHeight=${PLAYER_MAX_HEIGHT}`, {
-          preferNativeHls: hls,
-          mime: hls ? HLS_MIME : undefined,
-          maxHeight: PLAYER_MAX_HEIGHT,
-        })
+            preferNativeHls: false,
+          })
+        } else {
+          player.configure({
+            abr: { enabled: true },
+            restrictions: { maxHeight: PLAYER_MAX_HEIGHT },
+            streaming: {
+              bufferingGoal: 6,
+              rebufferingGoal: 1,
+              bufferBehind: 3,
+            },
+          })
+          labTrace(label, `configure maxHeight=${PLAYER_MAX_HEIGHT}`)
+        }
 
-        labTrace(label, 'attach(video)')
-        await player.attach(video)
+        labTrace(label, 'attach(video, initializeMediaSource=false)')
+        await player.attach(video, /* initializeMediaSource */ false)
         if (cancelled) return
 
         labTrace(label, 'load manifest', { src, mime: hls ? HLS_MIME : null })
